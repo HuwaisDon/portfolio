@@ -653,7 +653,54 @@ let door: THREE.Mesh = new THREE.Mesh();
         projArtifact.rotation.y += dt * 1.2;
       }
 
-      if (anim.moving && anim.waypoints.length > 0) {
+      const isWASD = keyState.w || keyState.a || keyState.s || keyState.d;
+
+      if (isWASD) {
+        // WASD realtime movement (overrides nav)
+        const forward = new THREE.Vector3(0, 0, 1);
+        const right = new THREE.Vector3(1, 0, 0);
+
+        // Movement directions: W/S = forward/back, A/D = strafe
+        const moveVec = new THREE.Vector3(0, 0, 0);
+        if (keyState.w) moveVec.add(forward);
+        if (keyState.s) moveVec.add(forward.clone().multiplyScalar(-1));
+        if (keyState.d) moveVec.add(right);
+        if (keyState.a) moveVec.add(right.clone().multiplyScalar(-1));
+
+        const len = moveVec.length();
+        if (len > 0) {
+          moveVec.normalize();
+          const step = anim.speed * dt;
+          charGroup.position.addScaledVector(moveVec, step);
+
+          // Face movement direction
+          const targetAngle = Math.atan2(moveVec.x, moveVec.z);
+          let da = targetAngle - charGroup.rotation.y;
+          da = Math.atan2(Math.sin(da), Math.cos(da));
+          charGroup.rotation.y += da * Math.min(1, 10 * dt);
+
+          // bobbing + dust
+          anim.bobT += dt * 10;
+          torso.position.y = 0.62 + Math.sin(anim.bobT) * 0.04;
+          head.position.y = 1.25 + Math.sin(anim.bobT) * 0.04;
+
+          if (Math.random() < 0.6) {
+            const idx = dustCursor % DUST_COUNT;
+            dustPositions[idx * 3] = charGroup.position.x + (Math.random() - 0.5) * 0.2;
+            dustPositions[idx * 3 + 1] = 0.05;
+            dustPositions[idx * 3 + 2] = charGroup.position.z + (Math.random() - 0.5) * 0.2;
+            dustLife[idx] = 1;
+            dustCursor++;
+          }
+
+          window.dispatchEvent(
+            new CustomEvent("town-coords", {
+              detail: { x: charGroup.position.x, z: charGroup.position.z },
+            })
+          );
+        }
+      } else if (anim.moving && anim.waypoints.length > 0) {
+        // Nav-based movement toward target
         const target = anim.waypoints[0];
         const dir = new THREE.Vector3().subVectors(target, charGroup.position);
         dir.y = 0;
@@ -701,10 +748,12 @@ let door: THREE.Mesh = new THREE.Mesh();
           );
         }
       } else {
+        // idle
         anim.bobT *= 0.9;
         torso.position.y = THREE.MathUtils.lerp(torso.position.y, 0.62, 0.1);
         head.position.y = THREE.MathUtils.lerp(head.position.y, 1.25, 0.1);
       }
+
 
       // fade dust
       for (let i = 0; i < DUST_COUNT; i++) {
