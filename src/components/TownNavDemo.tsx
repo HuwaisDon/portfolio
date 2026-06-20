@@ -1,8 +1,9 @@
- import React, { useRef, useEffect, useState, useCallback } from "react";
+import React, { useRef, useEffect, useState, useCallback } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import BuildingModal from "./BuildingModal";
 import "./BuildingModal.css";
+
 
 
 // ---- Site sections / buildings - STREET LAYOUT ----
@@ -22,6 +23,20 @@ export default function TownNavDemo() {
   const [status, setStatus] = useState("idle");
   const [coords, setCoords] = useState({ x: 0, z: 16 });
   const [showModal, setShowModal] = useState(false);
+
+  // Refs to keep the Three.js animation loop in sync with React state.
+  // This prevents the modal from getting “stuck” open due to stale closures.
+  const showModalRef = useRef(showModal);
+  const activeRef = useRef(active);
+
+  useEffect(() => {
+    showModalRef.current = showModal;
+  }, [showModal]);
+
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+
 
   // ---------- THREE.JS SETUP (once) ----------
   useEffect(() => {
@@ -148,42 +163,88 @@ export default function TownNavDemo() {
           });
         }
 
-        // Place lamps along both sidewalks at x = +/- 12.
-        const zs: number[] = [];
-        const zStart = -15;
-        const zEnd = 15;
-        const count = 6;
-        for (let i = 0; i < count; i++) {
-          zs.push(zStart + (i * (zEnd - zStart)) / (count - 1));
+        // Requirement: lamp posts only at the ends of the street,
+        // but lighting should still be present along the street.
+        // Coordinates provided by user:
+        //   Right side: x≈9.43..9.65 , z≈-19.15..19.50
+        //   Left side : x≈-9.50 , z≈19.70..-19.50 (varies on z)
+
+        // 1) Lamp posts (meshes) only near the street ends.
+        // User request: only 3 lamps per side, with a block gap (spaced evenly).
+        // User-specified lamp coordinates (3 per side)
+        // Right side:
+        //   lamp1: x=-10.74, z=19.81
+        //   lamp2: x=-10.99, z=5.71
+        //   lamp3: x=-10.97, z=-7.75
+        // Left side:
+        //   lamp1: x=11.29, z=19.62
+        //   lamp2: x=10.86, z=3.51
+        //   lamp3: x=10.78, z=-8.80
+        const lampPosts = [
+          // Right side (x negative)
+          { x: -10.74, z: 19.81 },
+          { x: -10.99, z: 5.71 },
+          { x: -10.97, z: -7.75 },
+
+          // Left side (x positive)
+          { x: 11.29, z: 19.62 },
+          { x: 10.86, z: 3.51 },
+          { x: 10.78, z: -8.8 },
+        ];
+
+
+        lampPosts.forEach(({ x, z }) => {
+          const inst = original.clone(true);
+          inst.scale.setScalar(scale);
+
+          // Initial placement so it sits on the ground (Y=0)
+          const instBox = new THREE.Box3().setFromObject(inst);
+          const bottomY = instBox.min.y;
+          inst.position.set(x, -bottomY, z);
+
+          // Fix orientation: right-side lamps need to face inward.
+          if (x > 0) inst.rotation.y = Math.PI;
+
+          // Recompute bounds after rotation, then lower so minY == 0.
+          const instBox2 = new THREE.Box3().setFromObject(inst);
+          const minY2 = instBox2.min.y;
+          if (Number.isFinite(minY2)) inst.position.y -= minY2;
+
+          // Final correction: align the instance bounds center on XZ exactly to target (x,z)
+          // This avoids dependence on the model/pivot origin.
+          const instBox3 = new THREE.Box3().setFromObject(inst);
+          const centerX = (instBox3.min.x + instBox3.max.x) / 2;
+          const centerZ = (instBox3.min.z + instBox3.max.z) / 2;
+          inst.position.x += x - centerX;
+          inst.position.z += z - centerZ;
+
+          setupLampInstance(inst);
+          streetGroup.add(inst);
+        });
+
+
+        // 2) Lighting only (point lights) along the whole street.
+        const lightZStart = -19.5;
+        const lightZEnd = 19.5;
+        const lightCount = 7;
+        const lightZs: number[] = [];
+        for (let i = 0; i < lightCount; i++) {
+          lightZs.push(lightZStart + (i * (lightZEnd - lightZStart)) / (lightCount - 1));
         }
 
-        const sidewalkX = [-12, 12];
+        const leftLightX = -9.5;
+        const rightLightX = 9.5;
 
-        sidewalkX.forEach((x) => {
-          zs.forEach((z) => {
-            const inst = original.clone(true);
-            inst.scale.setScalar(scale);
+        lightZs.forEach((z) => {
+          const leftLight = new THREE.PointLight(0xfff2cc, 2.0, 20);
+          leftLight.position.set(leftLightX, 4.8, z);
+          streetGroup.add(leftLight);
 
-            // Move so its bottom sits at y=0.
-            const instBox = new THREE.Box3().setFromObject(inst);
-            const bottomY = instBox.min.y;
-            inst.position.set(x, -bottomY, z);
-
-            // Fix orientation: right-side lamps need to face inward.
-            if (x > 0) {
-              inst.rotation.y = Math.PI;
-            }
-
-            setupLampInstance(inst);
-
-            // Optional: add a small point light at lamp head for stronger visibility.
-            const headLight = new THREE.PointLight(0xfff2cc, 2.2, 18);
-            headLight.position.set(x, 4.8, z);
-            streetGroup.add(headLight);
-
-            streetGroup.add(inst);
-          });
+          const rightLight = new THREE.PointLight(0xfff2cc, 2.0, 20);
+          rightLight.position.set(rightLightX, 4.8, z);
+          streetGroup.add(rightLight);
         });
+
 
 
         streetGroup.add(new THREE.AxesHelper(0.01));
@@ -655,17 +716,60 @@ let door: THREE.Mesh = new THREE.Mesh();
 
       const isWASD = keyState.w || keyState.a || keyState.s || keyState.d;
 
+      // Proximity-based building interaction (WASD-ready)
+      // If player is close to a building section, open its modal.
+      // If player moves away, close it.
+      const INTERACT_RADIUS = 2.5;
+      let nearest: { id: string; d: number } | null = null;
+      for (const s of SECTIONS) {
+        const [bx, , bz] = s.pos;
+        const dx = charGroup.position.x - bx;
+        const dz = charGroup.position.z - bz;
+        const d = Math.sqrt(dx * dx + dz * dz);
+        if (!nearest || d < nearest.d) nearest = { id: s.id, d };
+      }
+
+      if (nearest && nearest.d <= INTERACT_RADIUS) {
+        // open modal (and keep showing the same building id)
+        if (activeRef.current !== nearest.id) {
+          activeRef.current = nearest.id;
+          setActive(nearest.id);
+        }
+        if (!showModalRef.current) {
+          showModalRef.current = true;
+          setShowModal(true);
+        }
+        if (status !== "arrived") setStatus("arrived");
+      } else {
+        // IMPORTANT: building modal should close when player moves away.
+        if (showModalRef.current) {
+          showModalRef.current = false;
+          setShowModal(false);
+        }
+        // clear id to avoid re-opening immediately when leaving radius
+        if (activeRef.current !== null) {
+          activeRef.current = null;
+          setActive(null);
+        }
+        if (status !== "idle") setStatus("idle");
+      }
+
+
+
       if (isWASD) {
         // WASD realtime movement (overrides nav)
-        const forward = new THREE.Vector3(0, 0, 1);
-        const right = new THREE.Vector3(1, 0, 0);
+        // Build movement directions from the character's current facing
+        // so W/S and A/D feel consistent.
+        const y = charGroup.rotation.y;
+        const forwardDir = new THREE.Vector3(Math.sin(y), 0, Math.cos(y));
+        const rightDir = new THREE.Vector3(Math.cos(y), 0, -Math.sin(y));
 
         // Movement directions: W/S = forward/back, A/D = strafe
         const moveVec = new THREE.Vector3(0, 0, 0);
-        if (keyState.w) moveVec.add(forward);
-        if (keyState.s) moveVec.add(forward.clone().multiplyScalar(-1));
-        if (keyState.d) moveVec.add(right);
-        if (keyState.a) moveVec.add(right.clone().multiplyScalar(-1));
+        if (keyState.w) moveVec.add(forwardDir);
+        if (keyState.s) moveVec.sub(forwardDir);
+        if (keyState.d) moveVec.add(rightDir);
+        if (keyState.a) moveVec.sub(rightDir);
 
         const len = moveVec.length();
         if (len > 0) {
@@ -683,6 +787,7 @@ let door: THREE.Mesh = new THREE.Mesh();
           anim.bobT += dt * 10;
           torso.position.y = 0.62 + Math.sin(anim.bobT) * 0.04;
           head.position.y = 1.25 + Math.sin(anim.bobT) * 0.04;
+
 
           if (Math.random() < 0.6) {
             const idx = dustCursor % DUST_COUNT;
