@@ -24,7 +24,34 @@ export default function TownNavDemo() {
   const [coords, setCoords] = useState({ x: 0, z: 16 });
   const [showModal, setShowModal] = useState(false);
 
+  // If nav is clicked, we keep the modal open while the character is travelling.
+  // Proximity logic may otherwise close it between animation frames.
+  const navModalLockedRef = useRef(false);
+
+  // (kept for older experiments; not used)
+  // const suppressReopenForIdRef = useRef<string | null>(null);
+
+
+  // If user closes a modal while near a building, remember that id so proximity won't re-open it.
+  // Re-enable only after the player leaves the radius and comes back.
+  const userClosedForIdRef = useRef<string | null>(null);
+
+
+  const closeModal = useCallback(() => {
+    navModalLockedRef.current = false;
+
+    // Remember which building the user closed, so proximity won't re-open immediately.
+    userClosedForIdRef.current = activeRef.current;
+    suppressReopenForIdRef.current = activeRef.current;
+
+    setShowModal(false);
+    setActive(null);
+    setStatus("idle");
+  }, []);
+
+
   // Refs to keep the Three.js animation loop in sync with React state.
+
   // This prevents the modal from getting “stuck” open due to stale closures.
   const showModalRef = useRef(showModal);
   const activeRef = useRef(active);
@@ -135,6 +162,9 @@ export default function TownNavDemo() {
 
         // Compute bounds once so we can scale/position consistently.
         const box = new THREE.Box3().setFromObject(original);
+
+        // (Callbacks already typed with `any` in this codebase, we keep runtime behavior unchanged.)
+
         const size = box.getSize(new THREE.Vector3());
 
         // const maxDim = Math.max(size.x, size.y, size.z) || 1;
@@ -376,12 +406,13 @@ let door: THREE.Mesh = new THREE.Mesh();
         const gltfLoader = new GLTFLoader();
         gltfLoader.load(
           '/models/farm_house.glb',
-          (gltf) => {
+      (gltf: any) => {
             const model = gltf.scene;
 
             // Enable shadows on all child meshes
-            model.traverse((child) => {
+            model.traverse((child: any) => {
               if ((child as THREE.Mesh).isMesh) {
+
                 child.castShadow = true;
                 child.receiveShadow = true;
               }
@@ -407,8 +438,9 @@ let door: THREE.Mesh = new THREE.Mesh();
             group.add(model);
           },
           undefined,
-          (error) => {
+          (error: any) => {
             console.error('Error loading farm_house.glb:', error);
+
             // Fallback: render a simple box if model fails
             const fallback = new THREE.Mesh(
               new THREE.BoxGeometry(3.2, 4.0, 3.0),
@@ -444,10 +476,11 @@ let door: THREE.Mesh = new THREE.Mesh();
 
         gltfLoader.load(
           sectionModelUrl,
-          (gltf) => {
+          (gltf: any) => {
             const model = gltf.scene;
 
-            model.traverse((child) => {
+            model.traverse((child: any) => {
+
               if ((child as THREE.Mesh).isMesh) {
                 child.castShadow = true;
                 child.receiveShadow = true;
@@ -480,8 +513,9 @@ let door: THREE.Mesh = new THREE.Mesh();
             group.add(model);
           },
           undefined,
-          (error) => {
+          (error: any) => {
             console.error(`Error loading model for section ${s.id}:`, error);
+
 
             // Fallback: keep simple box so nav still works
             const fallback = new THREE.Mesh(
@@ -719,7 +753,8 @@ let door: THREE.Mesh = new THREE.Mesh();
       // Proximity-based building interaction (WASD-ready)
       // If player is close to a building section, open its modal.
       // If player moves away, close it.
-      const INTERACT_RADIUS = 2.5;
+      // Roughly ~3 “blocks” worth of proximity (tuned for this scene scale)
+      const INTERACT_RADIUS = 4.0;
       let nearest: { id: string; d: number } | null = null;
       for (const s of SECTIONS) {
         const [bx, , bz] = s.pos;
@@ -730,29 +765,55 @@ let door: THREE.Mesh = new THREE.Mesh();
       }
 
       if (nearest && nearest.d <= INTERACT_RADIUS) {
-        // open modal (and keep showing the same building id)
-        if (activeRef.current !== nearest.id) {
-          activeRef.current = nearest.id;
-          setActive(nearest.id);
+        // If user closed the modal for this specific building while they were near it,
+        // do not re-open until they leave the radius and come back.
+        const isUserSuppressed = userClosedForIdRef.current === nearest.id;
+
+        if (!isUserSuppressed) {
+          // open modal (and keep showing the same building id)
+          if (activeRef.current !== nearest.id) {
+            activeRef.current = nearest.id;
+            setActive(nearest.id);
+          }
+          if (!showModalRef.current) {
+            showModalRef.current = true;
+            setShowModal(true);
+          }
+          if (status !== "arrived") setStatus("arrived");
+        } else {
+          // Keep modal closed while suppressed.
+          if (showModalRef.current) {
+            showModalRef.current = false;
+            setShowModal(false);
+          }
+          if (activeRef.current !== null) {
+            activeRef.current = null;
+            setActive(null);
+          }
+          if (status !== "idle") setStatus("idle");
         }
-        if (!showModalRef.current) {
-          showModalRef.current = true;
-          setShowModal(true);
-        }
-        if (status !== "arrived") setStatus("arrived");
       } else {
+        // Player left the proximity radius.
+        // Re-enable re-opening only after leaving radius (and come back).
+        userClosedForIdRef.current = null;
+
         // IMPORTANT: building modal should close when player moves away.
-        if (showModalRef.current) {
-          showModalRef.current = false;
-          setShowModal(false);
+        // But if the user clicked a nav button, keep it open until arrival.
+        if (!navModalLockedRef.current) {
+          if (showModalRef.current) {
+            showModalRef.current = false;
+            setShowModal(false);
+          }
+          // clear id to avoid re-opening immediately when leaving radius
+          if (activeRef.current !== null) {
+            activeRef.current = null;
+            setActive(null);
+          }
+          if (status !== "idle") setStatus("idle");
         }
-        // clear id to avoid re-opening immediately when leaving radius
-        if (activeRef.current !== null) {
-          activeRef.current = null;
-          setActive(null);
-        }
-        if (status !== "idle") setStatus("idle");
       }
+
+
 
 
 
@@ -938,12 +999,17 @@ let door: THREE.Mesh = new THREE.Mesh();
   }, []);
 
   const handleNavClick = useCallback((id: string) => {
+    // Start walking, but also open the modal immediately.
+    // Otherwise the interaction loop can close it before the first town-arrived event fires.
     setStatus("walking");
-    setActive(null);
+    setActive(id);
+    setShowModal(true);
+
     if (stateRef.current.walkTo) {
       stateRef.current.walkTo(id);
     }
   }, []);
+
 
   return (
     <div
@@ -958,7 +1024,50 @@ let door: THREE.Mesh = new THREE.Mesh();
         overflow: "hidden",
       }}
     >
+      <div
+        style={{
+          position: "absolute",
+          top: 72,
+          left: 18,
+          zIndex: 999,
+          display: showModal ? "flex" : "none",
+          flexDirection: "column",
+          gap: 10,
+          pointerEvents: "auto",
+          maxWidth: 240,
+        }}
+      >
+        {SECTIONS.map((s) => {
+          const isActive = active === s.id;
+          const hex = `#${s.color.toString(16).padStart(6, "0")}`;
+          return (
+            <button
+              key={s.id}
+              onClick={() => handleNavClick(s.id)}
+              style={{
+                padding: "10px 14px",
+                borderRadius: 10,
+                border: `1.5px solid ${isActive ? hex : "rgba(245,245,240,0.18)"}`,
+                background: isActive ? `${hex}22` : "rgba(15,15,25,0.55)",
+                color: isActive ? hex : "#f5f5f0",
+                fontWeight: 700,
+                fontSize: 13,
+                letterSpacing: "0.01em",
+                cursor: "pointer",
+                backdropFilter: "blur(6px)",
+                transition: "all 0.2s ease",
+                boxShadow: isActive ? `0 0 16px ${hex}55` : "none",
+                textAlign: "left",
+              } as React.CSSProperties}
+            >
+              {s.label}
+            </button>
+          );
+        })}
+      </div>
+
       <div ref={mountRef} style={{ width: "100%", height: "100%" }} />
+
 
       {/* Top bar: site title */}
       <div
@@ -1025,7 +1134,7 @@ let door: THREE.Mesh = new THREE.Mesh();
           bottom: 24,
           left: 0,
           right: 0,
-          display: "flex",
+          display: showModal ? "none" : "flex",
           justifyContent: "center",
           gap: 10,
           flexWrap: "wrap",
@@ -1072,7 +1181,7 @@ let door: THREE.Mesh = new THREE.Mesh();
       <BuildingModal 
         buildingId={active} 
         isOpen={showModal}
-        onClose={() => setShowModal(false)}
+        onClose={closeModal}
       />
     </div>
   );

@@ -1,10 +1,7 @@
 # TODO
 
-- [x] Add WASD movement for character (W/S forward/back, A/D strafe or rotate+move).
-- [x] Keep camera follow behavior consistent with movement.
-- [x] Rotate right-side lamps so they face inward toward the street/center (fix orientation issue).
-- [x] Ensure navigation (bottom buttons) still works (either integrate with WASD or keep both controls).
-- [x] Build and verify `npm run build` succeeds.
-
-
+- [ ] Fix BuildingModal reopening behavior in `TownNavDemo.tsx`
+  - [ ] Remember when user manually closes a building modal
+  - [ ] Prevent proximity loop from re-opening it while player remains near same building
+  - [ ] Re-enable reopening only after player leaves radius and re-enters
 
