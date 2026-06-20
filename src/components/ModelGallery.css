@@ -1,0 +1,45 @@
+.model-gallery {
+  position: fixed;
+  top: 90px;
+  right: 18px;
+  width: 280px;
+  max-height: calc(100vh - 130px);
+  overflow: auto;
+  z-index: 999;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border: 1px solid rgba(233, 69, 96, 0.28);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(6px);
+  padding: 10px;
+}
+
+.model-row {
+  cursor: pointer;
+  padding: 12px 12px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.model-row:hover {
+  border-color: rgba(78, 205, 196, 0.45);
+  background: rgba(78, 205, 196, 0.08);
+}
+
+.model-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  color: #9bb4ff;
+  font-size: 12px;
+}
+
+.model-name {
+  color: #f5f5f0;
+  font-weight: 700;
+  font-size: 13px;
+}
+
