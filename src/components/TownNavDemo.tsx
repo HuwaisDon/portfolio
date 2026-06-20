@@ -829,7 +829,7 @@ let door: THREE.Mesh = new THREE.Mesh();
               letterSpacing: "-0.02em",
             }}
           >
-            TOWN<span style={{ color: "#e94560" }}>.NAV</span>
+            My<span style={{ color: "#e94560" }}> Portfolio</span>
           </div>
           <div
             style={{
@@ -839,7 +839,7 @@ let door: THREE.Mesh = new THREE.Mesh();
               marginTop: 2,
             }}
           >
-            3D wayfinding navigation — proof of concept
+            Data • AI • Web/3D — interactive portfolio demo
           </div>
         </div>
 
